@@ -1,0 +1,6 @@
+@SafeWayAPI_HostAddress = http://localhost:5143
+
+GET {{SafeWayAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
