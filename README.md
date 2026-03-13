@@ -90,20 +90,37 @@ Open **SQL Server Management Studio** and run:
 
 ```sql
 CREATE DATABASE SafeWayDB;
+GO
+
 USE SafeWayDB;
+GO
 
 CREATE TABLE Users (
     Id          INT IDENTITY(1,1) PRIMARY KEY,
-    UniqueID    NVARCHAR(20)  NOT NULL UNIQUE,
-    Password    NVARCHAR(255) NOT NULL,
+    UniqueID    NVARCHAR(20)  NOT NULL UNIQUE,  
+    Password    NVARCHAR(255) NOT NULL,          
     FullName    NVARCHAR(100) NOT NULL,
-    Role        NVARCHAR(20)  NOT NULL,
-    Grade       NVARCHAR(20)  NULL,
+    Role        NVARCHAR(20)  NOT NULL,          
+    Grade       NVARCHAR(20)  NULL,              
     CreatedAt   DATETIME DEFAULT GETDATE()
 );
+GO
+
 
 INSERT INTO Users (UniqueID, Password, FullName, Role)
 VALUES ('Admin', 'Admin123', 'System Admin', 'Admin');
+
+INSERT INTO Users (UniqueID, Password, FullName, Role, Grade)
+VALUES ('STU001', 'stu001pass', 'Ahmed Ali', 'Student', 'Grade 10');
+
+
+INSERT INTO Users (UniqueID, Password, FullName, Role)
+VALUES ('PAR001', 'par001pass', 'Mohammed Ali', 'Parent');
+
+
+INSERT INTO Users (UniqueID, Password, FullName, Role)
+VALUES ('DRV001', 'drv001pass', 'Khalid Hassan', 'Driver');
+GO
 ```
 
 ### 4. Create `appsettings.json`
