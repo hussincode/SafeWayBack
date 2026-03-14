@@ -31,7 +31,11 @@ namespace SafeWayAPI.Controllers
             if (user == null)
                 return Unauthorized(new { message = "ID not found." });
 
-            bool isCorrect = BCrypt.Net.BCrypt.Verify(request.Password, user.Password);
+            // BCrypt.Net may throw SaltParseException if the stored hash uses a version
+            // prefix that it doesn't recognize (e.g. $2y$ from some PHP implementations).
+            // Normalize it to a supported prefix before verifying.
+            var storedHash = NormalizeBcryptHash(user.Password);
+            bool isCorrect = BCrypt.Net.BCrypt.Verify(request.Password, storedHash);
 
             if (!isCorrect)
                 return Unauthorized(new { message = "Wrong password." });
@@ -53,10 +57,25 @@ namespace SafeWayAPI.Controllers
             var users = await _db.Users.ToListAsync();
             foreach (var user in users)
             {
-                user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
+                // Avoid re-hashing an already hashed password.
+                // BCrypt hashes start with $2a$, $2b$, $2y$, etc.
+                if (!user.Password.StartsWith("$2"))
+                {
+                    user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
+                }
             }
             await _db.SaveChangesAsync();
             return Ok("Passwords hashed!");
+        }
+
+        private static string NormalizeBcryptHash(string hash)
+        {
+            if (hash.StartsWith("$2y$") || hash.StartsWith("$2x$"))
+            {
+                return "$2a$" + hash.Substring(4);
+            }
+
+            return hash;
         }
 
         private string GenerateToken(SafeWayAPI.Models.User user)

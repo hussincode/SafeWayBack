@@ -9,5 +9,6 @@ namespace SafeWayAPI.Models
         public string Role { get; set; } = string.Empty;
         public string? Grade { get; set; }
         public DateTime CreatedAt { get; set; }
+        public int? ParentId { get; set; }
     }
 }
