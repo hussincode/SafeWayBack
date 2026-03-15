@@ -10,5 +10,9 @@ namespace SafeWayAPI.Models
         public string? Grade { get; set; }
         public DateTime CreatedAt { get; set; }
         public int? ParentId { get; set; }
+        public string? BusNumber  { get; set; }
+public string? DriverName { get; set; }
+public string? RouteName  { get; set; }
+public string? StopName   { get; set; }
     }
 }

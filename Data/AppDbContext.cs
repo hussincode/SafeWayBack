@@ -10,5 +10,8 @@ namespace SafeWayAPI.Data
         public DbSet<User> Users { get; set; }
 
         public DbSet<Subscription> Subscriptions { get; set; }
+
+        public DbSet<Station> Stations{ get; set; }
+        public DbSet<StationChangeRequest> StationChangeRequests { get; set; }
     }
 }
