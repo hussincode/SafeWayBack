@@ -5,6 +5,7 @@ USE SafeWayDB;
 GO
 
 
+
 CREATE TABLE Users (
     Id         INT          IDENTITY(1,1) PRIMARY KEY,
     UniqueID   NVARCHAR(20)  NOT NULL UNIQUE,
@@ -75,6 +76,7 @@ CREATE TABLE RouteChangeRequests (
 GO
 
 
+
 INSERT INTO Users (UniqueID, Password, FullName, Role)
 VALUES ('Admin', 'Admin123', 'System Admin', 'Admin');
 
@@ -111,7 +113,6 @@ INSERT INTO Routes (Name) VALUES
     ('Route D - West End'),
     ('Route E - South Gate');
 GO
-
 
 
 SELECT 'Users'                AS TableName, COUNT(*) AS Rows FROM Users

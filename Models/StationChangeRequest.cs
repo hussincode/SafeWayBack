@@ -8,7 +8,7 @@ public class StationChangeRequest
     public int      UserId       { get; set; }
     public int      NewStationId { get; set; }
 
-    [Column(TypeName = "date")]        
+    [Column(TypeName = "date")]       
     public DateTime? EffectiveDate { get; set; }
 
     public string   Status    { get; set; } = "PENDING";
