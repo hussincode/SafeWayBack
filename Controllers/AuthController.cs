@@ -13,19 +13,19 @@ namespace SafeWayAPI.Controllers
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
-        private readonly AppDbContext _context;
+        private readonly AppDbContext _db;
         private readonly IConfiguration _config;
 
-        public AuthController(AppDbContext context, IConfiguration config)
+        public AuthController(AppDbContext db, IConfiguration config)
         {
-            _context = context;
+            _db = db;
             _config = config;
         }
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            var user = await _context.Users
+            var user = await _db.Users
                 .FirstOrDefaultAsync(u => u.UniqueID == request.UniqueID);
 
             if (user == null)
@@ -47,14 +47,15 @@ namespace SafeWayAPI.Controllers
                 Token = token,
                 FullName = user.FullName,
                 Role = user.Role,
-                UniqueID = user.UniqueID
+                UniqueID = user.UniqueID,
+                Id = user.Id
             });
         }
 
         [HttpGet("setup")]
         public async Task<IActionResult> Setup()
         {
-            var users = await _context.Users.ToListAsync();
+            var users = await _db.Users.ToListAsync();
             foreach (var user in users)
             {
                 // Avoid re-hashing an already hashed password.
@@ -64,11 +65,26 @@ namespace SafeWayAPI.Controllers
                     user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
                 }
             }
-            await _context.SaveChangesAsync();
+            await _db.SaveChangesAsync();
             return Ok("Passwords hashed!");
         }
 
-        
+        [HttpGet("student-info/{userId:int}")]
+        public async Task<IActionResult> GetStudentInfo(int userId)
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) return NotFound(new { message = "User not found." });
+
+            return Ok(new {
+                fullName = user.FullName,
+                uniqueID = user.UniqueID,
+                grade = user.Grade ?? "",
+                busNumber = user.BusNumber ?? "Not assigned",
+                driverName = user.DriverName ?? "Not assigned",
+                routeName = user.RouteName ?? "Not assigned",
+                stopName = user.StopName ?? "Not assigned"
+            });
+        }
 
         private static string NormalizeBcryptHash(string hash)
         {
@@ -105,23 +121,6 @@ namespace SafeWayAPI.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
-
-        [HttpGet("student-info/{userId}")]
-public IActionResult GetStudentInfo(int userId)
-{
-    var user = _context.Users.FirstOrDefault(u => u.Id == userId);
-    if (user == null) return NotFound();
-
-    return Ok(new {
-        fullName   = user.FullName,
-        uniqueID   = user.UniqueID,
-        grade      = user.Grade,
-        busNumber  = user.BusNumber  ?? "Not assigned",
-        driverName = user.DriverName ?? "Not assigned",
-        routeName  = user.RouteName  ?? "Not assigned",
-        stopName   = user.StopName   ?? "Not assigned",
-    });
-}
 
     }  
 }      

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SafeWayAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4d6abbd13083da9456e5cce1cf1a6291f8e659a3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a39330c97785963600e7aac049a8b70ac6954c0f")]
 [assembly: System.Reflection.AssemblyProductAttribute("SafeWayAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SafeWayAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
