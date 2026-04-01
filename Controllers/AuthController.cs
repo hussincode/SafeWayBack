@@ -54,7 +54,146 @@ namespace SafeWayAPI.Controllers
             });
         }
 
-        
+        // Add this inside AuthController class, after GetStudentInfo
+
+[HttpGet("driver-info/{userId}")]
+public IActionResult GetDriverInfo(int userId)
+{
+    var driver = _context.Users
+        .FirstOrDefault(u => u.Id == userId && u.Role == "Driver");
+
+    if (driver == null)
+        return NotFound(new { message = "Driver not found" });
+
+    // Get all students assigned to this driver's bus
+    var students = _context.Users
+        .Where(u => u.BusNumber == driver.BusNumber && u.Role == "Student")
+        .ToList();
+
+    var studentData = students.Select(student => {
+        var sub = _context.Subscriptions
+            .Where(s => s.UserId == student.Id)
+            .OrderByDescending(s => s.Id)
+            .FirstOrDefault();
+
+        return new {
+            id            = student.Id,
+            fullName      = student.FullName,
+            grade         = student.Grade ?? "",
+            stopName      = student.StopName ?? "Not assigned",
+            paymentStatus = sub?.Status ?? "UNPAID",
+        };
+    }).ToList();
+
+    return Ok(new {
+        fullName      = driver.FullName,
+        uniqueID      = driver.UniqueID,
+        busNumber     = driver.BusNumber  ?? "Not assigned",
+        routeName     = driver.RouteName  ?? "Not assigned",
+        totalStudents = studentData.Count,
+        paidCount     = studentData.Count(s => s.paymentStatus == "PAID"),
+        unpaidCount   = studentData.Count(s => s.paymentStatus == "UNPAID"),
+        expiredCount  = studentData.Count(s => s.paymentStatus == "EXPIRED"),
+        students      = studentData,
+    });
+}
+
+
+
+        [HttpGet("parent-info/{parentId}")]
+public IActionResult GetParentInfo(int parentId)
+{
+    var parent = _context.Users.FirstOrDefault(u => u.Id == parentId);
+    if (parent == null)
+        return NotFound(new { message = "Parent not found" });
+
+    // Get all children linked to this parent
+    var children = _context.Users
+        .Where(u => u.ParentId == parentId)
+        .ToList();
+
+    var childrenData = children.Select(child => {
+        var sub = _context.Subscriptions
+            .Where(s => s.UserId == child.Id)
+            .OrderByDescending(s => s.Id)
+            .FirstOrDefault();
+
+        return new {
+            name         = child.FullName,
+            grade        = child.Grade ?? "",
+            busNumber    = "BUS-101",
+            eta          = "5 min",
+            pickupStation = "Main Street Station",
+            subscription = sub?.Status ?? "UNPAID",
+            isOnBoard    = false,
+            boardingNote = (string?)null,
+        };
+    }).ToList();
+
+    return Ok(new {
+        fullName  = parent.FullName,
+        uniqueID  = parent.UniqueID,
+        children  = childrenData,
+        onBoardCount      = 0,
+        activeSubsCount   = childrenData.Count(c => c.subscription == "PAID"),
+        totalChildren     = childrenData.Count,
+    });
+}
+
+// Add this inside AuthController, after GetDriverInfo
+
+[HttpGet("driver-route/{userId}")]
+public IActionResult GetDriverRoute(int userId)
+{
+    var driver = _context.Users
+        .FirstOrDefault(u => u.Id == userId && u.Role == "Driver");
+
+    if (driver == null)
+        return NotFound(new { message = "Driver not found" });
+
+
+    var route = _context.Routes.FirstOrDefault(r => r.Name == driver.RouteName);
+    
+    if (route == null)
+        return NotFound(new { message = "Route not found for this driver" });
+
+    // Get all stops for this route in order
+    var stops = _context.RouteStations
+        .Where(rs => rs.RouteId == route.Id)
+        .OrderBy(rs => rs.StopOrder)
+        .Select(rs => new {
+            stopOrder  = rs.StopOrder,
+            pickupTime = rs.PickupTime,
+            station    = new {
+                id   = rs.Station.Id,
+                name = rs.Station.Name,
+            },
+            // Students assigned to this stop
+            students = _context.Users
+                .Where(u => u.StopName == rs.Station.Name
+                         && u.BusNumber == driver.BusNumber
+                         && u.Role == "Student")
+                .Select(u => new {
+                    id            = u.Id,
+                    fullName      = u.FullName,
+                    grade         = u.Grade ?? "",
+                    paymentStatus = _context.Subscriptions
+                        .Where(s => s.UserId == u.Id)
+                        .OrderByDescending(s => s.Id)
+                        .Select(s => s.Status)
+                        .FirstOrDefault() ?? "UNPAID",
+                })
+                .ToList(),
+        })
+        .ToList();
+
+    return Ok(new {
+        routeName    = route.Name,
+        busNumber    = driver.BusNumber ?? "Not assigned",
+        totalStops   = stops.Count,
+        stops        = stops,
+    });
+}
 
         [HttpGet("setup")]
         public async Task<IActionResult> Setup()
@@ -110,6 +249,8 @@ namespace SafeWayAPI.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+
+
 
         [HttpGet("student-info/{userId}")]
         

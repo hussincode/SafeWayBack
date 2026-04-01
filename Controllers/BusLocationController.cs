@@ -18,7 +18,31 @@ public class BusLocationController : ControllerBase
         _updatedAt = DateTime.UtcNow;
         return Ok(new { message = "Location updated" });
     }
+    // Student location storage
+private static double _studentLat = 30.0444;
+private static double _studentLng = 31.2357;
+private static DateTime _studentUpdatedAt = DateTime.UtcNow;
 
+// POST: api/buslocation/student-update
+[HttpPost("student-update")]
+public IActionResult UpdateStudentLocation([FromBody] LocationDto dto)
+{
+    _studentLat = dto.Latitude;
+    _studentLng = dto.Longitude;
+    _studentUpdatedAt = DateTime.UtcNow;
+    return Ok(new { message = "Student location updated" });
+}
+
+// GET: api/buslocation/student-current
+[HttpGet("student-current")]
+public IActionResult GetStudentLocation()
+{
+    return Ok(new {
+        latitude  = _studentLat,
+        longitude = _studentLng,
+        updatedAt = _studentUpdatedAt
+    });
+}
     [HttpGet("current")]
     public IActionResult GetLocation()
     {

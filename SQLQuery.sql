@@ -75,6 +75,17 @@ CREATE TABLE RouteChangeRequests (
 );
 GO
 
+CREATE TABLE RouteStations (
+    Id           INT          IDENTITY(1,1) PRIMARY KEY,
+    RouteId      INT          NOT NULL,
+    StationId    INT          NOT NULL,
+    StopOrder    INT          NOT NULL,
+    PickupTime   NVARCHAR(10) NOT NULL,
+    CONSTRAINT FK_RS_Routes   FOREIGN KEY (RouteId)   REFERENCES Routes(Id),
+    CONSTRAINT FK_RS_Stations FOREIGN KEY (StationId) REFERENCES Stations(Id)
+);
+GO
+
 
 
 INSERT INTO Users (UniqueID, Password, FullName, Role)
@@ -115,6 +126,29 @@ INSERT INTO Routes (Name) VALUES
 GO
 
 
+
+INSERT INTO RouteStations (RouteId, StationId, StopOrder, PickupTime) VALUES
+    (1, 1, 1, '07:15 AM'),   
+    (1, 2, 2, '07:25 AM'),   
+    (1, 3, 3, '07:35 AM');   
+
+
+INSERT INTO RouteStations (RouteId, StationId, StopOrder, PickupTime) VALUES
+    (2, 4, 1, '07:10 AM'),   
+    (2, 5, 2, '07:20 AM');   
+
+
+INSERT INTO RouteStations (RouteId, StationId, StopOrder, PickupTime) VALUES
+    (3, 1, 1, '07:30 AM'),
+    (3, 3, 2, '07:45 AM'),
+    (4, 2, 1, '07:00 AM'),
+    (4, 4, 2, '07:15 AM'),
+    (5, 5, 1, '07:05 AM'),
+    (5, 1, 2, '07:20 AM');
+GO
+
+
+
 SELECT 'Users'                AS TableName, COUNT(*) AS Rows FROM Users
 UNION ALL
 SELECT 'Subscriptions',                     COUNT(*) FROM Subscriptions
@@ -126,4 +160,15 @@ UNION ALL
 SELECT 'StationChangeRequests',             COUNT(*) FROM StationChangeRequests
 UNION ALL
 SELECT 'RouteChangeRequests',               COUNT(*) FROM RouteChangeRequests;
+GO
+
+SELECT
+    r.Name        AS Route,
+    rs.StopOrder,
+    s.Name        AS Station,
+    rs.PickupTime
+FROM RouteStations rs
+JOIN Routes   r ON r.Id = rs.RouteId
+JOIN Stations s ON s.Id = rs.StationId
+ORDER BY r.Id, rs.StopOrder;
 GO

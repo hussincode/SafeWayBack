@@ -19,5 +19,6 @@ public class StationChangeRequest
 
     // Navigation properties
     public User?    User       { get; set; }
+    public BusRoute? NewRoute { get; set; }
     public Station? NewStation { get; set; }
 }
