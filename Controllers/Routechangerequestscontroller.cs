@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
+using Npgsql;
 
 namespace SafeWay.Controllers
 {
@@ -19,10 +19,10 @@ namespace SafeWay.Controllers
         public async Task<IActionResult> GetStations()
         {
             var list = new List<object>();
-            using var con = new SqlConnection(_conn);
+            using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
-            using var cmd = new SqlCommand(
-                "SELECT Id, Name FROM Stations WHERE IsActive = 1 ORDER BY Name", con);
+            using var cmd = new NpgsqlCommand(
+                "SELECT id, name FROM stations WHERE isactive = true ORDER BY name", con);
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 list.Add(new { id = reader.GetInt32(0), name = reader.GetString(1) });
@@ -34,10 +34,10 @@ namespace SafeWay.Controllers
         public async Task<IActionResult> GetRoutes()
         {
             var list = new List<object>();
-            using var con = new SqlConnection(_conn);
+            using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
-            using var cmd = new SqlCommand(
-                "SELECT Id, Name FROM Routes WHERE IsActive = 1 ORDER BY Name", con);
+            using var cmd = new NpgsqlCommand(
+                "SELECT id, name FROM routes WHERE isactive = true ORDER BY name", con);
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 list.Add(new { id = reader.GetInt32(0), name = reader.GetString(1) });
@@ -52,31 +52,31 @@ namespace SafeWay.Controllers
             if (dto.UserId == 0 || dto.NewStationId == 0 || dto.NewRouteId == 0 || dto.EffectiveDate == default)
                 return BadRequest(new { message = "userId, newStationId, newRouteId and effectiveDate are all required." });
 
-            using var con = new SqlConnection(_conn);
+            using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
 
             // Block duplicate PENDING request for same user
-            var checkCmd = new SqlCommand(@"
-                SELECT COUNT(*) FROM RouteChangeRequests
-                WHERE UserId = @UserId AND Status = 'PENDING'", con);
+            var checkCmd = new NpgsqlCommand(@"
+                SELECT COUNT(*) FROM routechangerequests
+                WHERE userid = @UserId AND status = 'PENDING'", con);
             checkCmd.Parameters.AddWithValue("@UserId", dto.UserId);
-            var existing = (int)await checkCmd.ExecuteScalarAsync()!;
+            var existing = (long)(await checkCmd.ExecuteScalarAsync() ?? 0L);
             if (existing > 0)
                 return Conflict(new { message = "You already have a pending route change request. Please wait for it to be reviewed." });
 
-            var insertCmd = new SqlCommand(@"
-                INSERT INTO RouteChangeRequests
-                    (UserId, NewStationId, NewRouteId, EffectiveDate, Status)
-                OUTPUT INSERTED.Id
+            var insertCmd = new NpgsqlCommand(@"
+                INSERT INTO routechangerequests
+                    (userid, newstationid, newrouteid, effectivedate, status)
                 VALUES
-                    (@UserId, @NewStationId, @NewRouteId, @EffectiveDate, 'PENDING')", con);
+                    (@UserId, @NewStationId, @NewRouteId, @EffectiveDate, 'PENDING')
+                RETURNING id", con);
 
             insertCmd.Parameters.AddWithValue("@UserId",        dto.UserId);
             insertCmd.Parameters.AddWithValue("@NewStationId",  dto.NewStationId);
             insertCmd.Parameters.AddWithValue("@NewRouteId",    dto.NewRouteId);
-            insertCmd.Parameters.AddWithValue("@EffectiveDate", dto.EffectiveDate.ToString("yyyy-MM-dd"));
+            insertCmd.Parameters.AddWithValue("@EffectiveDate", dto.EffectiveDate);
 
-            var newId = (int)await insertCmd.ExecuteScalarAsync()!;
+            var newId = (int)(await insertCmd.ExecuteScalarAsync() ?? 0);
             return Ok(new { id = newId, message = "Route change request submitted successfully." });
         }
 
@@ -86,22 +86,22 @@ namespace SafeWay.Controllers
         public async Task<IActionResult> GetByUser(int userId)
         {
             var list = new List<object>();
-            using var con = new SqlConnection(_conn);
+            using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
-            using var cmd = new SqlCommand(@"
+            using var cmd = new NpgsqlCommand(@"
                 SELECT
-                    rcr.Id,
-                    s.Name        AS StationName,
-                    r.Name        AS RouteName,
-                    rcr.EffectiveDate,
-                    rcr.Status,
-                    rcr.AdminNote,
-                    rcr.CreatedAt
-                FROM RouteChangeRequests rcr
-                JOIN Stations s ON s.Id = rcr.NewStationId
-                JOIN Routes   r ON r.Id = rcr.NewRouteId
-                WHERE rcr.UserId = @UserId
-                ORDER BY rcr.CreatedAt DESC", con);
+                    rcr.id,
+                    s.name        AS StationName,
+                    r.name        AS RouteName,
+                    rcr.effectivedate,
+                    rcr.status,
+                    rcr.adminnote,
+                    rcr.createdat
+                FROM routechangerequests rcr
+                JOIN stations s ON s.id = rcr.newstationid
+                JOIN routes   r ON r.id = rcr.newrouteid
+                WHERE rcr.userid = @UserId
+                ORDER BY rcr.createdat DESC", con);
             cmd.Parameters.AddWithValue("@UserId", userId);
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
