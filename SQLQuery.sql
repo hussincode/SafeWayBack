@@ -10,6 +10,8 @@ CREATE TABLE users (
     password   VARCHAR(255) NOT NULL,
     fullname   VARCHAR(100) NOT NULL,
     role       VARCHAR(20)  NOT NULL,
+    phone      VARCHAR(20)  NULL,
+    status     VARCHAR(20)  NULL,
     grade      VARCHAR(20)  NULL,
     parentid   INTEGER      NULL,
     busnumber  VARCHAR(20)  NULL,

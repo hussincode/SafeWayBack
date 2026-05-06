@@ -88,7 +88,104 @@ namespace SafeWayAPI.Controllers
             }
         }
 
-        // Returns real student data for Admin -> Manage Students screen.
+        // Add driver
+        // POST /api/admin/drivers
+        [HttpPost("drivers")]
+        public async Task<ActionResult> AddDriver([FromBody] AddDriverRequestDto dto)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                var fullName = (dto.FullName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(fullName))
+                    return BadRequest(new { message = "FullName is required" });
+
+                var busNumber = (dto.BusNumber ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(busNumber))
+                    return BadRequest(new { message = "BusNumber is required" });
+
+                var routeName = (dto.RouteName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(routeName))
+                    return BadRequest(new { message = "RouteName is required" });
+
+                var phone = (dto.Phone ?? string.Empty).Trim();
+
+                // Create a new driver user
+                var driver = new Models.User
+                {
+                    FullName = fullName,
+                    Role = "Driver",
+                    BusNumber = busNumber,
+                    Phone = phone,
+                    RouteName = routeName,
+                    CreatedAt = DateTime.UtcNow,
+                    Status = "Active",
+                    UniqueID = "DRV-" + Guid.NewGuid().ToString("N").Substring(0, 8)
+                };
+
+                _context.Users.Add(driver);
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Driver added successfully",
+                    driver = new
+                    {
+                        driver.UniqueID,
+                        driver.Id,
+                        driver.FullName,
+                        driver.BusNumber,
+                        driver.Phone,
+                        driver.RouteName,
+                        driver.Status
+                    }
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "Error in AddDriver (DbUpdateException)");
+                return StatusCode(500, new { message = "Error adding driver (db)", error = ex.InnerException?.Message ?? ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AddDriver");
+                return StatusCode(500, new { message = "Error adding driver", error = ex.Message });
+            }
+        }
+
+
+        [HttpGet("drivers")]
+        public async Task<ActionResult<List<DriverRecordDto>>> GetDrivers()
+        {
+            try
+            {
+                var drivers = await _context.Users
+                    .Where(u => u.Role == "Driver")
+                    .OrderBy(u => u.FullName)
+                    .Select(u => new DriverRecordDto
+                    {
+                        Id = u.Id,
+                        DriverId = string.IsNullOrWhiteSpace(u.UniqueID) ? "" : u.UniqueID,
+                        FullName = u.FullName ?? string.Empty,
+                        Email = "", // backend does not have email field in User model
+                        Phone = "", // backend does not have phone field in User model
+                        BusId = u.BusNumber ?? string.Empty,
+                        Route = u.RouteName ?? string.Empty,
+                        Status = "Active" // TODO: map to real active/inactive field when available
+                    })
+                    .ToListAsync();
+
+                return Ok(drivers);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error in GetDrivers: {ex.Message}");
+                return StatusCode(500, new { message = "Error fetching drivers", error = ex.Message });
+            }
+        }
+
         // GET /api/admin/students
         [HttpGet("students")]
         public async Task<ActionResult<List<StudentRecordDto>>> GetStudents()
@@ -233,8 +330,8 @@ namespace SafeWayAPI.Controllers
                 .Select(g => new
                 {
                     BusNumber = g.Key,
-                    Driver = g.FirstOrDefault()!.FullName,
-                    Route = g.FirstOrDefault()!.RouteName ?? "Route Unknown"
+                    Driver = g.Select(x => x.FullName).FirstOrDefault() ?? "No Driver",
+                    Route = g.Select(x => x.RouteName).FirstOrDefault(r => !string.IsNullOrEmpty(r)) ?? "Route Unknown"
                 })
                 .ToListAsync();
 
