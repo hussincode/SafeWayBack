@@ -24,7 +24,20 @@ builder.Services.AddSwaggerGen();
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(
+            builder.Configuration.GetConnectionString("DefaultConnection"),
+            npgsqlOptions =>
+            {
+                // Helps with transient connectivity issues (like pooler timeouts)
+                npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorCodesToAdd: null);
+
+                // Optional: extend EF-side command timeout (actual connect/query timeouts come from connection string)
+                npgsqlOptions.CommandTimeout(60);
+            }));
+
 
 // JWT
 var jwtKey = builder.Configuration["JwtSettings:SecretKey"]!;
