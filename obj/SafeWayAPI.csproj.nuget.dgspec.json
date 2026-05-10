@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\SafeWay\\SafeWayBack\\SafeWayAPI.csproj": {}
+    "D:\\SafeWay\\safewayback\\SafeWayAPI.csproj": {}
   },
   "projects": {
-    "D:\\SafeWay\\SafeWayBack\\SafeWayAPI.csproj": {
+    "D:\\SafeWay\\safewayback\\SafeWayAPI.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\SafeWay\\SafeWayBack\\SafeWayAPI.csproj",
+        "projectUniqueName": "D:\\SafeWay\\safewayback\\SafeWayAPI.csproj",
         "projectName": "SafeWayAPI",
-        "projectPath": "D:\\SafeWay\\SafeWayBack\\SafeWayAPI.csproj",
+        "projectPath": "D:\\SafeWay\\safewayback\\SafeWayAPI.csproj",
         "packagesPath": "C:\\Users\\Hesham\\.nuget\\packages\\",
-        "outputPath": "D:\\SafeWay\\SafeWayBack\\obj\\",
+        "outputPath": "D:\\SafeWay\\safewayback\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

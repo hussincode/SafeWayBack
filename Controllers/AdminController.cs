@@ -93,6 +93,7 @@ namespace SafeWayAPI.Controllers
         [HttpPost("drivers")]
         public async Task<ActionResult> AddDriver([FromBody] AddDriverRequestDto dto)
         {
+
             try
             {
                 if (dto == null)
@@ -122,8 +123,12 @@ namespace SafeWayAPI.Controllers
                     RouteName = routeName,
                     CreatedAt = DateTime.UtcNow,
                     Status = "Active",
-                    UniqueID = "DRV-" + Guid.NewGuid().ToString("N").Substring(0, 8)
+                    // Generate UniqueID format: DRV001, DRV002, ... (no repeat)
+                    UniqueID = GenerateNextDriverUniqueId(),
                 };
+
+                // Password format: drv001pass (matches the number in UniqueID)
+                driver.Password = GenerateDriverPasswordFromUniqueId(driver.UniqueID);
 
                 _context.Users.Add(driver);
                 await _context.SaveChangesAsync();
@@ -170,7 +175,7 @@ namespace SafeWayAPI.Controllers
                         DriverId = string.IsNullOrWhiteSpace(u.UniqueID) ? "" : u.UniqueID,
                         FullName = u.FullName ?? string.Empty,
                         Email = "", // backend does not have email field in User model
-                        Phone = "", // backend does not have phone field in User model
+                        Phone = u.Phone ?? string.Empty, // backend does not have phone field in User model
                         BusId = u.BusNumber ?? string.Empty,
                         Route = u.RouteName ?? string.Empty,
                         Status = "Active" // TODO: map to real active/inactive field when available
@@ -186,9 +191,88 @@ namespace SafeWayAPI.Controllers
             }
         }
 
+        // PUT /api/admin/drivers/{id}
+        [HttpPut("drivers/{id:int}")]
+        public async Task<ActionResult> UpdateDriver([FromRoute] int id, [FromBody] AddDriverRequestDto dto)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                var driver = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Driver");
+                if (driver == null)
+                    return NotFound(new { message = "Driver not found" });
+
+                var fullName = (dto.FullName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(fullName))
+                    return BadRequest(new { message = "FullName is required" });
+
+                var busNumber = (dto.BusNumber ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(busNumber))
+                    return BadRequest(new { message = "BusNumber is required" });
+
+                var routeName = (dto.RouteName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(routeName))
+                    return BadRequest(new { message = "RouteName is required" });
+
+                var phone = (dto.Phone ?? string.Empty).Trim();
+
+                driver.FullName = fullName;
+                driver.BusNumber = busNumber;
+                driver.Phone = phone;
+                driver.RouteName = routeName;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Driver updated successfully" });
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "Error in UpdateDriver (DbUpdateException)");
+                return StatusCode(500, new { message = "Error updating driver (db)", error = ex.InnerException?.Message ?? ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in UpdateDriver");
+                return StatusCode(500, new { message = "Error updating driver", error = ex.Message });
+            }
+        }
+
+
         // GET /api/admin/students
+
+
         [HttpGet("students")]
+        [HttpDelete("drivers/{id:int}")]
+        public async Task<ActionResult> DeleteDriver([FromRoute] int id)
+        {
+            try
+            {
+                var driver = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Driver");
+                if (driver == null)
+                    return NotFound(new { message = "Driver not found" });
+
+                _context.Users.Remove(driver);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Driver deleted successfully" });
+            }
+            catch (DbUpdateException ex)
+            {
+                _logger.LogError(ex, "Error in DeleteDriver (DbUpdateException)");
+                return StatusCode(500, new { message = "Error deleting driver (db)", error = ex.InnerException?.Message ?? ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in DeleteDriver");
+                return StatusCode(500, new { message = "Error deleting driver", error = ex.Message });
+            }
+        }
+
+
         public async Task<ActionResult<List<StudentRecordDto>>> GetStudents()
+
         {
             try
             {
@@ -423,6 +507,38 @@ namespace SafeWayAPI.Controllers
         {
             var stops = new[] { "Main Street Station (5 min)", "Oak Street Station (8 min)", "Central Plaza (10 min)", "North Terminal (7 min)" };
             return stops[index % stops.Length];
+        }
+
+        private string GenerateNextDriverUniqueId()
+        {
+     var existing = _context.Users
+        .Where(u => u.Role == "Driver" && u.UniqueID != null && u.UniqueID.StartsWith("DRV"))
+        .Select(u => u.UniqueID)
+        .ToList();
+
+    var usedNumbers = existing
+        .Select(u => u.Length >= 6 ? u.Substring(3) : "")
+        .Where(s => int.TryParse(s, out _))
+        .Select(int.Parse)
+        .ToHashSet();
+
+    var next = 1;
+    while (usedNumbers.Contains(next)) next++;
+
+    // enforce exactly DRV001 format
+    return $"DRV{next:000}";
+        }
+
+        private string GenerateDriverPasswordFromUniqueId(string uniqueId)
+        {
+    if (string.IsNullOrWhiteSpace(uniqueId)) 
+        return string.Empty;
+
+    var numberPart = uniqueId.StartsWith("DRV") 
+        ? uniqueId.Substring(3) 
+        : uniqueId;
+
+    return $"drv{numberPart}pass";
         }
     }
 }
