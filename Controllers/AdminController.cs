@@ -241,41 +241,12 @@ namespace SafeWayAPI.Controllers
 
 
         // GET /api/admin/students
-
-
         [HttpGet("students")]
-        [HttpDelete("drivers/{id:int}")]
-        public async Task<ActionResult> DeleteDriver([FromRoute] int id)
-        {
-            try
-            {
-                var driver = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Driver");
-                if (driver == null)
-                    return NotFound(new { message = "Driver not found" });
-
-                _context.Users.Remove(driver);
-                await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Driver deleted successfully" });
-            }
-            catch (DbUpdateException ex)
-            {
-                _logger.LogError(ex, "Error in DeleteDriver (DbUpdateException)");
-                return StatusCode(500, new { message = "Error deleting driver (db)", error = ex.InnerException?.Message ?? ex.Message });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in DeleteDriver");
-                return StatusCode(500, new { message = "Error deleting driver", error = ex.Message });
-            }
-        }
-
-
         public async Task<ActionResult<List<StudentRecordDto>>> GetStudents()
-
         {
             try
             {
+
                 // For each student, return latest subscription status.
                 // NOTE: This uses two queries for clarity; it can be optimized later.
                 var students = await _context.Users

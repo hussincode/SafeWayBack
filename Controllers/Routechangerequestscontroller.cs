@@ -14,35 +14,125 @@ namespace SafeWay.Controllers
             _conn = config.GetConnectionString("DefaultConnection")!;
         }
 
-        // ── GET /api/routechangerequests/stations
+        // GET /api/routechangerequests/stations
+        // Returns full station info for admin ManageRoutes page.
+        // Output shape: { id, name, address, students, scheduledTime, routes }
         [HttpGet("stations")]
         public async Task<IActionResult> GetStations()
         {
             var list = new List<object>();
             using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
-            using var cmd = new NpgsqlCommand(
-                "SELECT id, name FROM stations WHERE isactive = true ORDER BY name", con);
+
+            // NOTE: SQLQuery.sql schema doesn't have address.
+            // We'll return name as address for now.
+            using var cmd = new NpgsqlCommand(@"
+                SELECT
+                    s.id,
+                    s.name,
+                    COALESCE(s.name, '') AS address,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM users u
+                        WHERE u.role = 'Student' AND u.stopname = s.name
+                    ), 0) AS students,
+                    COALESCE((
+                        SELECT rs.pickuptime
+                        FROM routestations rs
+                        WHERE rs.stationid = s.id
+                        ORDER BY rs.stoporder ASC
+                        LIMIT 1
+                    ), '') AS scheduledTime,
+                    COALESCE((
+                        SELECT string_agg(r.name, ', ' ORDER BY r.name)
+                        FROM routestations rs
+                        JOIN routes r ON r.id = rs.routeid
+                        WHERE rs.stationid = s.id AND r.isactive = true
+                    ), '') AS routesCsv
+                FROM stations s
+                WHERE s.isactive = true
+                ORDER BY s.name;
+            ", con);
+
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                list.Add(new { id = reader.GetInt32(0), name = reader.GetString(1) });
+            {
+                var id = reader.GetInt32(0);
+                var name = reader.GetString(1);
+                var address = reader.GetString(2);
+                var students = reader.GetInt32(3);
+                var scheduledTime = reader.GetString(4);
+                var routesCsv = reader.GetString(5);
+
+                var routes = string.IsNullOrWhiteSpace(routesCsv)
+                    ? new List<string>()
+                    : routesCsv.Split(',').Select(x => x.Trim()).Where(x => x != string.Empty).ToList();
+
+                list.Add(new
+                {
+                    id,
+                    name,
+                    address,
+                    students,
+                    scheduledTime,
+                    routes,
+                });
+            }
+
             return Ok(list);
         }
 
+
         // ── GET /api/routechangerequests/routes
+        // Returns full route info for admin ManageRoutes page.
+        // Output shape: { id, name, busId, driver, stops, status }
         [HttpGet("routes")]
         public async Task<IActionResult> GetRoutes()
         {
             var list = new List<object>();
             using var con = new NpgsqlConnection(_conn);
             await con.OpenAsync();
-            using var cmd = new NpgsqlCommand(
-                "SELECT id, name FROM routes WHERE isactive = true ORDER BY name", con);
+
+            using var cmd = new NpgsqlCommand(@"
+                SELECT
+                    r.id,
+                    r.name,
+                    COALESCE(d.busnumber, '') AS busId,
+                    COALESCE(d.drivername, '') AS driver,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM routestations rs
+                        WHERE rs.routeid = r.id
+                    ), 0) AS stops,
+                    CASE
+                        WHEN r.isactive = true THEN 'Active'
+                        ELSE 'Inactive'
+                    END AS status
+                FROM routes r
+                LEFT JOIN users d
+                    ON d.role = 'Driver'
+                    AND d.routename = r.name
+                WHERE r.isactive = true
+                ORDER BY r.name;
+            ", con);
+
             using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                list.Add(new { id = reader.GetInt32(0), name = reader.GetString(1) });
+            {
+                list.Add(new
+                {
+                    id = reader.GetInt32(0),
+                    name = reader.GetString(1),
+                    busId = reader.GetString(2),
+                    driver = reader.GetString(3),
+                    stops = reader.GetInt32(4),
+                    status = reader.GetString(5),
+                });
+            }
+
             return Ok(list);
         }
+
 
         // ── POST /api/routechangerequests
         //    Body: { userId, newStationId, newRouteId, effectiveDate }
