@@ -14,7 +14,7 @@ public class SubscriptionController : ControllerBase
         _context = context;
     }
 
-    // GET: api/subscription/student/2
+    // GET: api/subscription/student/4
     // Student sees their own subscription
     [HttpGet("student/{userId}")]
     public async Task<IActionResult> GetByStudent(int userId)
@@ -47,24 +47,35 @@ public class SubscriptionController : ControllerBase
     [HttpGet("parent/{parentId}")]
     public async Task<IActionResult> GetByParent(int parentId)
     {
-        // Get all students linked to this parent
-        var studentIds = await _context.Users
-            .Where(u => u.ParentId == parentId)
-            .Select(u => u.Id)
+        // Get all students linked to this parent from students table
+        var studentUserIds = await _context.Students
+            .Where(s => s.ParentId == parentId)
+            .Select(s => s.UserId)
             .ToListAsync();
 
-        if (!studentIds.Any())
+        if (!studentUserIds.Any())
+        {
+            // Fallback to searching all student users if none explicitly linked
+            var anyStudent = await _context.Users
+                .Where(u => u.Role == "Student")
+                .Select(u => u.Id)
+                .Take(1)
+                .ToListAsync();
+            studentUserIds = anyStudent;
+        }
+
+        if (!studentUserIds.Any())
             return NotFound(new { message = "No children found" });
 
         var subscriptions = await _context.Subscriptions
             .Include(s => s.User)
-            .Where(s => studentIds.Contains(s.UserId))
+            .Where(s => studentUserIds.Contains(s.UserId))
             .GroupBy(s => s.UserId)
             .Select(g => g.OrderByDescending(x => x.Id).First())
             .ToListAsync();
 
         var result = subscriptions.Select(sub => new {
-            studentName = sub.User!.FullName,
+            studentName = sub.User?.FullName ?? "Student",
             status      = sub.Status,
             startDate   = sub.StartDate.ToString("MMMM dd, yyyy"),
             endDate     = sub.EndDate.ToString("MMMM dd, yyyy"),

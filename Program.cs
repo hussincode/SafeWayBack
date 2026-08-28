@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using SafeWayAPI.Data;
-using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,20 +22,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // Database
+// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(
-            builder.Configuration.GetConnectionString("DefaultConnection"),
-            npgsqlOptions =>
-            {
-                // Helps with transient connectivity issues (like pooler timeouts)
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorCodesToAdd: null);
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-                // Optional: extend EF-side command timeout (actual connect/query timeouts come from connection string)
-                npgsqlOptions.CommandTimeout(60);
-            }));
 
 
 // JWT

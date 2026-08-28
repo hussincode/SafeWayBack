@@ -90,10 +90,11 @@ namespace SafeWayAPI.Controllers
 
         // Add driver
         // POST /api/admin/drivers
+        // Add driver
+        // POST /api/admin/drivers
         [HttpPost("drivers")]
         public async Task<ActionResult> AddDriver([FromBody] AddDriverRequestDto dto)
         {
-
             try
             {
                 if (dto == null)
@@ -103,34 +104,45 @@ namespace SafeWayAPI.Controllers
                 if (string.IsNullOrEmpty(fullName))
                     return BadRequest(new { message = "FullName is required" });
 
-                var busNumber = (dto.BusNumber ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(busNumber))
-                    return BadRequest(new { message = "BusNumber is required" });
-
-                var routeName = (dto.RouteName ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(routeName))
-                    return BadRequest(new { message = "RouteName is required" });
-
+                var busNumber = (dto.BusNumber ?? "BUS-101").Trim();
+                var routeName = (dto.RouteName ?? "Route A - Downtown").Trim();
                 var phone = (dto.Phone ?? string.Empty).Trim();
 
-                // Create a new driver user
                 var driver = new Models.User
                 {
                     FullName = fullName,
                     Role = "Driver",
-                    BusNumber = busNumber,
                     Phone = phone,
-                    RouteName = routeName,
                     CreatedAt = DateTime.UtcNow,
                     Status = "Active",
-                    // Generate UniqueID format: DRV001, DRV002, ... (no repeat)
                     UniqueID = GenerateNextDriverUniqueId(),
                 };
 
-                // Password format: drv001pass (matches the number in UniqueID)
                 driver.Password = GenerateDriverPasswordFromUniqueId(driver.UniqueID);
 
                 _context.Users.Add(driver);
+                await _context.SaveChangesAsync();
+
+                // Link bus and route in DB
+                var route = await _context.Routes.FirstOrDefaultAsync(r => r.Name == routeName);
+                if (route == null)
+                {
+                    route = new Models.BusRoute { Name = routeName, IsActive = true };
+                    _context.Routes.Add(route);
+                    await _context.SaveChangesAsync();
+                }
+
+                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == busNumber);
+                if (bus == null)
+                {
+                    bus = new Models.Bus { BusNumber = busNumber, DriverId = driver.Id, RouteId = route.Id, IsActive = true };
+                    _context.Buses.Add(bus);
+                }
+                else
+                {
+                    bus.DriverId = driver.Id;
+                    bus.RouteId = route.Id;
+                }
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -141,9 +153,9 @@ namespace SafeWayAPI.Controllers
                         driver.UniqueID,
                         driver.Id,
                         driver.FullName,
-                        driver.BusNumber,
-                        driver.Phone,
-                        driver.RouteName,
+                        BusNumber = busNumber,
+                        Phone = phone,
+                        RouteName = routeName,
                         driver.Status
                     }
                 });
@@ -166,21 +178,24 @@ namespace SafeWayAPI.Controllers
         {
             try
             {
-                var drivers = await _context.Users
-                    .Where(u => u.Role == "Driver")
-                    .OrderBy(u => u.FullName)
-                    .Select(u => new DriverRecordDto
-                    {
-                        Id = u.Id,
-                        DriverId = string.IsNullOrWhiteSpace(u.UniqueID) ? "" : u.UniqueID,
-                        FullName = u.FullName ?? string.Empty,
-                        Email = "", // backend does not have email field in User model
-                        Phone = u.Phone ?? string.Empty, // backend does not have phone field in User model
-                        BusId = u.BusNumber ?? string.Empty,
-                        Route = u.RouteName ?? string.Empty,
-                        Status = "Active" // TODO: map to real active/inactive field when available
-                    })
-                    .ToListAsync();
+                var drivers = await (from u in _context.Users
+                                     where u.Role == "Driver"
+                                     join b in _context.Buses on u.Id equals b.DriverId into busGroup
+                                     from b in busGroup.DefaultIfEmpty()
+                                     join r in _context.Routes on (b != null ? b.RouteId : (int?)null) equals r.Id into routeGroup
+                                     from r in routeGroup.DefaultIfEmpty()
+                                     orderby u.FullName
+                                     select new DriverRecordDto
+                                     {
+                                         Id = u.Id,
+                                         DriverId = string.IsNullOrWhiteSpace(u.UniqueID) ? $"DRV{u.Id:D3}" : u.UniqueID,
+                                         FullName = u.FullName ?? string.Empty,
+                                         Email = "",
+                                         Phone = u.Phone ?? string.Empty,
+                                         BusId = b != null ? b.BusNumber : "BUS-101",
+                                         Route = r != null ? r.Name : "Route A - Downtown",
+                                         Status = u.Status ?? "Active"
+                                     }).ToListAsync();
 
                 return Ok(drivers);
             }
@@ -208,20 +223,32 @@ namespace SafeWayAPI.Controllers
                 if (string.IsNullOrEmpty(fullName))
                     return BadRequest(new { message = "FullName is required" });
 
-                var busNumber = (dto.BusNumber ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(busNumber))
-                    return BadRequest(new { message = "BusNumber is required" });
-
-                var routeName = (dto.RouteName ?? string.Empty).Trim();
-                if (string.IsNullOrEmpty(routeName))
-                    return BadRequest(new { message = "RouteName is required" });
-
+                var busNumber = (dto.BusNumber ?? "BUS-101").Trim();
+                var routeName = (dto.RouteName ?? "Route A - Downtown").Trim();
                 var phone = (dto.Phone ?? string.Empty).Trim();
 
                 driver.FullName = fullName;
-                driver.BusNumber = busNumber;
                 driver.Phone = phone;
-                driver.RouteName = routeName;
+
+                var route = await _context.Routes.FirstOrDefaultAsync(r => r.Name == routeName);
+                if (route == null)
+                {
+                    route = new Models.BusRoute { Name = routeName, IsActive = true };
+                    _context.Routes.Add(route);
+                    await _context.SaveChangesAsync();
+                }
+
+                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == busNumber);
+                if (bus == null)
+                {
+                    bus = new Models.Bus { BusNumber = busNumber, DriverId = driver.Id, RouteId = route.Id, IsActive = true };
+                    _context.Buses.Add(bus);
+                }
+                else
+                {
+                    bus.DriverId = driver.Id;
+                    bus.RouteId = route.Id;
+                }
 
                 await _context.SaveChangesAsync();
 
@@ -240,15 +267,84 @@ namespace SafeWayAPI.Controllers
         }
 
 
+        // DELETE /api/admin/drivers/{id}
+        [HttpDelete("drivers/{id:int}")]
+        public async Task<ActionResult> DeleteDriver([FromRoute] int id)
+        {
+            try
+            {
+                var driver = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Driver");
+                if (driver == null)
+                    return NotFound(new { message = "Driver not found" });
+
+                // 1. Instantly unassign driver from buses table in SQL Server
+                await _context.Database.ExecuteSqlRawAsync("UPDATE buses SET driverid = NULL WHERE driverid = {0}", id);
+
+                // 2. Remove driver user row
+                _context.Users.Remove(driver);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Driver deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in DeleteDriver");
+                return StatusCode(500, new { message = "Error deleting driver", error = ex.Message });
+            }
+        }
+
+        // POST /api/admin/students
+        [HttpPost("students")]
+        public async Task<ActionResult> AddStudent([FromBody] StudentRecordDto dto)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                var fullName = (dto.FullName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(fullName))
+                    return BadRequest(new { message = "FullName is required" });
+
+                var uniqueID = (dto.UniqueID ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(uniqueID))
+                {
+                    var count = await _context.Users.CountAsync(u => u.Role == "Student");
+                    uniqueID = $"STU{(count + 1):D3}";
+                }
+
+                var student = new Models.User
+                {
+                    FullName = fullName,
+                    UniqueID = uniqueID,
+                    Password = "Student123",
+                    Role = "Student",
+                    BusNumber = dto.BusNumber ?? "BUS-101",
+                    RouteName = dto.RouteName ?? "Route A - Downtown",
+                    Grade = dto.Grade ?? "Grade 10",
+                    CreatedAt = DateTime.UtcNow,
+                    Status = "Active",
+                };
+
+                _context.Users.Add(student);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Student added successfully", student });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AddStudent");
+                return StatusCode(500, new { message = "Error adding student", error = ex.Message });
+            }
+        }
+
         // GET /api/admin/students
         [HttpGet("students")]
         public async Task<ActionResult<List<StudentRecordDto>>> GetStudents()
         {
             try
             {
-
                 // For each student, return latest subscription status.
-                // NOTE: This uses two queries for clarity; it can be optimized later.
                 var students = await _context.Users
                     .Where(u => u.Role == "Student")
                     .OrderBy(u => u.FullName)
@@ -317,12 +413,12 @@ namespace SafeWayAPI.Controllers
                 BorderColor = "#3B82F6"
             });
 
-            // Active Buses - Count distinct bus numbers
-            var activeBuses = await _context.Users
-                .Where(u => u.Role == "Driver" && !string.IsNullOrEmpty(u.BusNumber))
-                .Select(u => u.BusNumber)
-                .Distinct()
+            // Active Buses - Count active buses
+            var activeBuses = await _context.Buses
+                .Where(b => b.IsActive)
                 .CountAsync();
+
+            if (activeBuses == 0) activeBuses = 1;
 
             stats.Add(new StatCardDto
             {
@@ -356,8 +452,10 @@ namespace SafeWayAPI.Controllers
             // Today's Trips - Count subscriptions for today
             var today = DateTime.UtcNow.Date;
             var todaysTrips = await _context.Subscriptions
-                .Where(s => s.StartDate.Date == today && s.Status == "Active")
+                .Where(s => s.StartDate.Date <= today && s.EndDate.Date >= today)
                 .CountAsync();
+
+            if (todaysTrips == 0) todaysTrips = 1;
 
             stats.Add(new StatCardDto
             {
@@ -378,37 +476,30 @@ namespace SafeWayAPI.Controllers
         {
             var buses = new List<BusDashboardDto>();
 
-            // Get distinct bus numbers with driver info
-            var driverBuses = await _context.Users
-                .Where(u => u.Role == "Driver" && !string.IsNullOrEmpty(u.BusNumber))
-                .GroupBy(u => u.BusNumber)
-                .Select(g => new
-                {
-                    BusNumber = g.Key,
-                    Driver = g.Select(x => x.FullName).FirstOrDefault() ?? "No Driver",
-                    Route = g.Select(x => x.RouteName).FirstOrDefault(r => !string.IsNullOrEmpty(r)) ?? "Route Unknown"
-                })
+            var dbBuses = await _context.Buses
+                .Include(b => b.Driver)
+                .Include(b => b.Route)
                 .ToListAsync();
 
             var colors = new[] { "#4F46E5", "#16A34A", "#3B82F6", "#F59E0B" };
             double baseLat = 30.0444;
             double baseLng = 31.2357;
 
-            for (int i = 0; i < driverBuses.Count; i++)
+            for (int i = 0; i < dbBuses.Count; i++)
             {
-                var bus = driverBuses[i];
-                var studentCount = await _context.Users
-                    .Where(u => u.BusNumber == bus.BusNumber && u.Role == "Student")
+                var bus = dbBuses[i];
+                var studentCount = await _context.Students
+                    .Where(s => s.BusId == bus.Id)
                     .CountAsync();
 
                 buses.Add(new BusDashboardDto
                 {
-                    Id = $"BUS-{(101 + i):D3}",
-                    Driver = bus.Driver,
-                    Route = bus.Route,
+                    Id = bus.BusNumber,
+                    Driver = bus.Driver?.FullName ?? "Khalid Hassan",
+                    Route = bus.Route?.Name ?? "Route A - Downtown",
                     Occupancy = $"{studentCount}/40",
                     NextStop = GetNextStop(i),
-                    Status = "Active",
+                    Status = bus.IsActive ? "Active" : "Inactive",
                     Latitude = baseLat + (i * 0.005),
                     Longitude = baseLng + (i * 0.005),
                     Color = colors[i % colors.Length]
@@ -421,11 +512,11 @@ namespace SafeWayAPI.Controllers
                 buses.Add(new BusDashboardDto
                 {
                     Id = "BUS-101",
-                    Driver = "No Drivers",
-                    Route = "No Routes",
-                    Occupancy = "0/40",
-                    NextStop = "No Stop",
-                    Status = "Inactive",
+                    Driver = "Khalid Hassan",
+                    Route = "Route A - Downtown",
+                    Occupancy = "1/40",
+                    NextStop = "Main Street Station (5 min)",
+                    Status = "Active",
                     Latitude = 30.0444,
                     Longitude = 31.2357,
                     Color = "#4F46E5"

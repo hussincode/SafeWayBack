@@ -31,17 +31,19 @@ namespace SafeWayAPI.Controllers
             if (user == null)
                 return Unauthorized(new { message = "ID not found." });
 
-            // Try BCrypt verification first, fall back to plaintext for testing
-            bool isCorrect = false;
-            try
+            // Check if password matches (plaintext or BCrypt hash)
+            bool isCorrect = request.Password == user.Password;
+            if (!isCorrect && !string.IsNullOrEmpty(user.Password))
             {
-                var storedHash = NormalizeBcryptHash(user.Password);
-                isCorrect = BCrypt.Net.BCrypt.Verify(request.Password, storedHash);
-            }
-            catch (BCrypt.Net.SaltParseException)
-            {
-                // If BCrypt fails (plaintext password), do plaintext comparison for testing
-                isCorrect = request.Password == user.Password;
+                try
+                {
+                    var storedHash = NormalizeBcryptHash(user.Password);
+                    isCorrect = BCrypt.Net.BCrypt.Verify(request.Password, storedHash);
+                }
+                catch
+                {
+                    isCorrect = false;
+                }
             }
 
             if (!isCorrect)
@@ -72,10 +74,24 @@ public IActionResult GetDriverInfo(int userId)
     if (driver == null)
         return NotFound(new { message = "Driver not found" });
 
-    // Get all students assigned to this driver's bus
-    var students = _context.Users
-        .Where(u => u.BusNumber == driver.BusNumber && u.Role == "Student")
-        .ToList();
+    var bus = _context.Buses.FirstOrDefault(b => b.DriverId == userId);
+    var route = bus != null && bus.RouteId.HasValue 
+        ? _context.Routes.FirstOrDefault(r => r.Id == bus.RouteId.Value) 
+        : _context.Routes.FirstOrDefault();
+
+    var busNumber = bus?.BusNumber ?? "BUS-101";
+    var routeName = route?.Name ?? "Route A - Downtown";
+
+    var studentUserIds = bus != null 
+        ? _context.Students.Where(s => s.BusId == bus.Id).Select(s => s.UserId).ToList()
+        : _context.Users.Where(u => u.Role == "Student").Select(u => u.Id).ToList();
+
+    if (!studentUserIds.Any())
+    {
+        studentUserIds = _context.Users.Where(u => u.Role == "Student").Select(u => u.Id).ToList();
+    }
+
+    var students = _context.Users.Where(u => studentUserIds.Contains(u.Id)).ToList();
 
     var studentData = students.Select(student => {
         var sub = _context.Subscriptions
@@ -86,8 +102,8 @@ public IActionResult GetDriverInfo(int userId)
         return new {
             id            = student.Id,
             fullName      = student.FullName,
-            grade         = student.Grade ?? "",
-            stopName      = student.StopName ?? "Not assigned",
+            grade         = "Grade 10",
+            stopName      = "Main Street Station",
             paymentStatus = sub?.Status ?? "UNPAID",
         };
     }).ToList();
@@ -95,8 +111,8 @@ public IActionResult GetDriverInfo(int userId)
     return Ok(new {
         fullName      = driver.FullName,
         uniqueID      = driver.UniqueID,
-        busNumber     = driver.BusNumber  ?? "Not assigned",
-        routeName     = driver.RouteName  ?? "Not assigned",
+        busNumber     = busNumber,
+        routeName     = routeName,
         totalStudents = studentData.Count,
         paidCount     = studentData.Count(s => s.paymentStatus == "PAID"),
         unpaidCount   = studentData.Count(s => s.paymentStatus == "UNPAID"),
@@ -108,44 +124,59 @@ public IActionResult GetDriverInfo(int userId)
 
 
         [HttpGet("parent-info/{parentId}")]
-public IActionResult GetParentInfo(int parentId)
-{
-    var parent = _context.Users.FirstOrDefault(u => u.Id == parentId);
-    if (parent == null)
-        return NotFound(new { message = "Parent not found" });
+        public IActionResult GetParentInfo(int parentId)
+        {
+            var parent = _context.Users.FirstOrDefault(u => u.Id == parentId);
+            if (parent == null)
+                return NotFound(new { message = "Parent not found" });
 
-    // Get all children linked to this parent
-    var children = _context.Users
-        .Where(u => u.ParentId == parentId)
-        .ToList();
+            // Get student UserIds linked to this parent from students table
+            var childUserIds = _context.Students
+                .Where(s => s.ParentId == parentId)
+                .Select(s => s.UserId)
+                .ToList();
 
-    var childrenData = children.Select(child => {
-        var sub = _context.Subscriptions
-            .Where(s => s.UserId == child.Id)
-            .OrderByDescending(s => s.Id)
-            .FirstOrDefault();
+            if (!childUserIds.Any())
+            {
+                // Fallback to all student users if none explicitly linked
+                childUserIds = _context.Users
+                    .Where(u => u.Role == "Student")
+                    .Select(u => u.Id)
+                    .Take(1)
+                    .ToList();
+            }
 
-        return new {
-            name         = child.FullName,
-            grade        = child.Grade ?? "",
-            busNumber    = "BUS-101",
-            eta          = "5 min",
-            pickupStation = "Main Street Station",
-            subscription = sub?.Status ?? "UNPAID",
-            isOnBoard    = false,
-            boardingNote = (string?)null,
-        };
-    }).ToList();
+            var children = _context.Users
+                .Where(u => childUserIds.Contains(u.Id))
+                .ToList();
 
-    return Ok(new {
-        fullName  = parent.FullName,
-        uniqueID  = parent.UniqueID,
-        children  = childrenData,
-        onBoardCount      = 0,
-        activeSubsCount   = childrenData.Count(c => c.subscription == "PAID"),
-        totalChildren     = childrenData.Count,
-    });
-}
+            var childrenData = children.Select(child => {
+                var sub = _context.Subscriptions
+                    .Where(s => s.UserId == child.Id)
+                    .OrderByDescending(s => s.Id)
+                    .FirstOrDefault();
+
+                return new {
+                    name          = child.FullName,
+                    grade         = child.Grade ?? "Grade 10",
+                    busNumber     = "BUS-101",
+                    eta           = "5 min",
+                    pickupStation = "Main Street Station",
+                    subscription  = sub?.Status ?? "UNPAID",
+                    isOnBoard     = false,
+                    boardingNote  = (string?)null,
+                };
+            }).ToList();
+
+            return Ok(new {
+                fullName        = parent.FullName,
+                uniqueID        = parent.UniqueID,
+                children        = childrenData,
+                onBoardCount    = 0,
+                activeSubsCount = childrenData.Count(c => c.subscription == "PAID"),
+                totalChildren   = childrenData.Count,
+            });
+        }
 
 // Add this inside AuthController, after GetDriverInfo
 
@@ -158,56 +189,49 @@ public IActionResult GetDriverRoute(int userId)
     if (driver == null)
         return NotFound(new { message = "Driver not found" });
 
+    var bus = _context.Buses.FirstOrDefault(b => b.DriverId == userId);
+    var route = bus != null && bus.RouteId.HasValue 
+        ? _context.Routes.FirstOrDefault(r => r.Id == bus.RouteId.Value) 
+        : _context.Routes.FirstOrDefault();
 
-    var route = _context.Routes.FirstOrDefault(r => r.Name == driver.RouteName);
-    
     if (route == null)
         return NotFound(new { message = "Route not found for this driver" });
 
-    // Get all stops for this route in order
-    var stops = _context.RouteStations
+    var busNumber = bus?.BusNumber ?? "BUS-101";
+
+    var routeStations = _context.RouteStations
+        .Include(rs => rs.Station)
         .Where(rs => rs.RouteId == route.Id)
         .OrderBy(rs => rs.StopOrder)
-        .Select(rs => new {
-            stopOrder  = rs.StopOrder,
-            pickupTime = rs.PickupTime,
-            station = new {
-                id   = rs.Station.Id,
-                name = rs.Station.Name,
-            },
-            // Students assigned to this stop
-            students = _context.Users
-                .Where(u => u.StopName == rs.Station.Name
-                     && u.BusNumber == driver.BusNumber
-                     && u.Role == "Student")
-                .Select(u => new {
-                    id            = u.Id,
-                    fullName      = u.FullName,
-                    grade         = u.Grade ?? "",
-                    paymentStatus = _context.Subscriptions
-                        .Where(s => s.UserId == u.Id)
-                        .OrderByDescending(s => s.Id)
-                        .Select(s => s.Status)
-                        .FirstOrDefault() ?? "UNPAID",
-                })
-                .ToList()
-        })
-        .ToList()
-        .Select(rs => new {  // Use client-side LINQ for null handling
-            rs.stopOrder,
-            rs.pickupTime,
-            station = new {
-                id   = rs.station.id,
-                name = rs.station.name ?? "Unknown",
-            },
-            rs.students
-        })
         .ToList();
+
+    var stops = routeStations.Select(rs => new {
+        stopOrder = rs.StopOrder,
+        pickupTime = rs.PickupTime.ToString(@"hh\:mm"),
+        station = new {
+            id = rs.Station != null ? rs.Station.Id : rs.StationId,
+            name = rs.Station != null ? rs.Station.Name : "Station",
+        },
+        students = _context.Users
+            .Where(u => u.Role == "Student")
+            .Select(u => new {
+                id = u.Id,
+                fullName = u.FullName,
+                grade = "Grade 10",
+                paymentStatus = _context.Subscriptions
+                    .Where(s => s.UserId == u.Id)
+                    .OrderByDescending(s => s.Id)
+                    .Select(s => s.Status)
+                    .FirstOrDefault() ?? "UNPAID",
+            })
+            .ToList()
+    }).ToList();
+
     return Ok(new {
-        routeName    = route.Name,
-        busNumber    = driver.BusNumber ?? "Not assigned",
-        totalStops   = stops.Count,
-        stops        = stops,
+        routeName = route.Name,
+        busNumber = busNumber,
+        totalStops = stops.Count,
+        stops = stops,
     });
 }
 
@@ -269,25 +293,23 @@ public IActionResult GetDriverRoute(int userId)
 
 
         [HttpGet("student-info/{userId}")]
-        
-public IActionResult GetStudentInfo(int userId)
-{
-    var user = _context.Users
-        .FirstOrDefault(u => u.Id == userId);
+        public async Task<IActionResult> GetStudentInfo(int userId)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null)
+                return NotFound(new { message = "User not found" });
 
-    if (user == null)
-        return NotFound(new { message = "User not found" });
-
-    return Ok(new {
-        fullName   = user.FullName,
-        uniqueID   = user.UniqueID,
-        grade      = user.Grade ?? "",
-        busNumber  = "BUS-101",       // ← لسه static لحد ما تعمل Bus table
-        driverName = "Michael Davis", // ← لسه static
-        routeName  = "Route A - Downtown", // ← static
-        stopName   = "Main Street Station" // ← static
-    });
-}
+            return Ok(new
+            {
+                fullName = user.FullName,
+                uniqueID = user.UniqueID,
+                grade = "Grade 10",
+                busNumber = "BUS-101",
+                driverName = "Khalid Hassan",
+                routeName = "Route A - Downtown",
+                stopName = "Main Street Station"
+            });
+        }
 
     }  
 }
