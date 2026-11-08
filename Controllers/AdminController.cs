@@ -104,9 +104,19 @@ namespace SafeWayAPI.Controllers
                 if (string.IsNullOrEmpty(fullName))
                     return BadRequest(new { message = "FullName is required" });
 
-                var busNumber = (dto.BusNumber ?? "BUS-101").Trim();
+                var busNumber = (dto.BusNumber ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(busNumber))
+                    return BadRequest(new { message = "BusNumber is required" });
+
                 var routeName = (dto.RouteName ?? "Route A - Downtown").Trim();
                 var phone = (dto.Phone ?? string.Empty).Trim();
+
+                // Validate that bus number does not already exist (1 driver = 1 dedicated bus)
+                var existingBus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber.ToLower() == busNumber.ToLower());
+                if (existingBus != null)
+                {
+                    return BadRequest(new { message = $"Bus number '{busNumber}' already exists in the system. Each driver must have a distinct bus." });
+                }
 
                 var driver = new Models.User
                 {
@@ -123,26 +133,24 @@ namespace SafeWayAPI.Controllers
                 _context.Users.Add(driver);
                 await _context.SaveChangesAsync();
 
-                // Link bus and route in DB
+                // Link or create route in DB
                 var route = await _context.Routes.FirstOrDefaultAsync(r => r.Name == routeName);
-                if (route == null)
+                if (route == null && !string.IsNullOrWhiteSpace(routeName))
                 {
                     route = new Models.BusRoute { Name = routeName, IsActive = true };
                     _context.Routes.Add(route);
                     await _context.SaveChangesAsync();
                 }
 
-                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == busNumber);
-                if (bus == null)
+                // Add the new bus in database assigned to this driver
+                var bus = new Models.Bus
                 {
-                    bus = new Models.Bus { BusNumber = busNumber, DriverId = driver.Id, RouteId = route.Id, IsActive = true };
-                    _context.Buses.Add(bus);
-                }
-                else
-                {
-                    bus.DriverId = driver.Id;
-                    bus.RouteId = route.Id;
-                }
+                    BusNumber = busNumber,
+                    DriverId = driver.Id,
+                    RouteId = route?.Id,
+                    IsActive = true
+                };
+                _context.Buses.Add(bus);
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -238,16 +246,34 @@ namespace SafeWayAPI.Controllers
                     await _context.SaveChangesAsync();
                 }
 
-                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == busNumber);
-                if (bus == null)
+                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.DriverId == driver.Id);
+                if (bus != null)
                 {
-                    bus = new Models.Bus { BusNumber = busNumber, DriverId = driver.Id, RouteId = route.Id, IsActive = true };
-                    _context.Buses.Add(bus);
+                    if (!bus.BusNumber.Equals(busNumber, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var dup = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber.ToLower() == busNumber.ToLower() && b.Id != bus.Id);
+                        if (dup != null)
+                            return BadRequest(new { message = $"Bus number '{busNumber}' already exists." });
+
+                        bus.BusNumber = busNumber;
+                    }
+                    bus.RouteId = route?.Id;
                 }
                 else
                 {
-                    bus.DriverId = driver.Id;
-                    bus.RouteId = route.Id;
+                    var dup = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber.ToLower() == busNumber.ToLower());
+                    if (dup != null)
+                    {
+                        if (dup.DriverId != null && dup.DriverId != driver.Id)
+                            return BadRequest(new { message = $"Bus number '{busNumber}' is already assigned to another driver." });
+                        dup.DriverId = driver.Id;
+                        dup.RouteId = route?.Id;
+                    }
+                    else
+                    {
+                        bus = new Models.Bus { BusNumber = busNumber, DriverId = driver.Id, RouteId = route?.Id, IsActive = true };
+                        _context.Buses.Add(bus);
+                    }
                 }
 
                 await _context.SaveChangesAsync();
@@ -277,8 +303,20 @@ namespace SafeWayAPI.Controllers
                 if (driver == null)
                     return NotFound(new { message = "Driver not found" });
 
-                // 1. Instantly unassign driver from buses table in SQL Server
-                await _context.Database.ExecuteSqlRawAsync("UPDATE buses SET driverid = NULL WHERE driverid = {0}", id);
+                // 1. Remove driver's bus from database if no students are assigned, otherwise unassign
+                var driverBuses = await _context.Buses.Where(b => b.DriverId == id).ToListAsync();
+                foreach (var b in driverBuses)
+                {
+                    var hasStudents = await _context.Students.AnyAsync(s => s.BusId == b.Id);
+                    if (!hasStudents)
+                    {
+                        _context.Buses.Remove(b);
+                    }
+                    else
+                    {
+                        b.DriverId = null;
+                    }
+                }
 
                 // 2. Remove driver user row
                 _context.Users.Remove(driver);
@@ -329,6 +367,16 @@ namespace SafeWayAPI.Controllers
                 _context.Users.Add(student);
                 await _context.SaveChangesAsync();
 
+                var bus = await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == (dto.BusNumber ?? "BUS-101"));
+                var profile = new Models.Student
+                {
+                    UserId = student.Id,
+                    Grade = dto.Grade ?? "Grade 10",
+                    BusId = bus?.Id
+                };
+                _context.Students.Add(profile);
+                await _context.SaveChangesAsync();
+
                 return Ok(new { message = "Student added successfully", student });
             }
             catch (Exception ex)
@@ -369,17 +417,28 @@ namespace SafeWayAPI.Controllers
 
                 var subByUserId = latestSubscriptions.ToDictionary(s => s.UserId, s => s.Status);
 
-                var result = students.Select(s => new StudentRecordDto
+                var studentProfiles = await _context.Students
+                    .Where(s => studentIds.Contains(s.UserId))
+                    .Include(s => s.Bus)
+                        .ThenInclude(b => b!.Route)
+                    .ToListAsync();
+                var profileMap = studentProfiles.ToDictionary(s => s.UserId);
+
+                var result = students.Select(s =>
                 {
-                    Id = s.Id,
-                    FullName = s.FullName ?? string.Empty,
-                    UniqueID = s.UniqueID ?? string.Empty,
-                    BusNumber = s.BusNumber ?? "Not assigned",
-                    RouteName = s.RouteName ?? "Not assigned",
-                    Grade = s.Grade ?? string.Empty,
-                    SubscriptionStatus = subByUserId.TryGetValue(s.Id, out var status)
-                        ? status ?? "UNPAID"
-                        : "UNPAID"
+                    profileMap.TryGetValue(s.Id, out var prof);
+                    return new StudentRecordDto
+                    {
+                        Id = s.Id,
+                        FullName = s.FullName ?? string.Empty,
+                        UniqueID = s.UniqueID ?? string.Empty,
+                        BusNumber = prof?.Bus?.BusNumber ?? (!string.IsNullOrEmpty(s.BusNumber) ? s.BusNumber : "Not assigned"),
+                        RouteName = prof?.Bus?.Route?.Name ?? (!string.IsNullOrEmpty(s.RouteName) ? s.RouteName : "Not assigned"),
+                        Grade = prof?.Grade ?? (!string.IsNullOrEmpty(s.Grade) ? s.Grade : "Grade 10"),
+                        SubscriptionStatus = subByUserId.TryGetValue(s.Id, out var status)
+                            ? status ?? "UNPAID"
+                            : "UNPAID"
+                    };
                 }).ToList();
 
                 return Ok(result);
@@ -388,6 +447,145 @@ namespace SafeWayAPI.Controllers
             {
                 _logger.LogError($"Error in GetStudents: {ex.Message}");
                 return StatusCode(500, new { message = "Error fetching students", error = ex.Message });
+            }
+        }
+
+        // PUT /api/admin/students/{id}
+        [HttpPut("students/{id:int}")]
+        public async Task<ActionResult> UpdateStudent([FromRoute] int id, [FromBody] StudentRecordDto dto)
+        {
+            try
+            {
+                if (dto == null)
+                    return BadRequest(new { message = "Request body is required" });
+
+                var student = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Student");
+                if (student == null)
+                    return NotFound(new { message = "Student not found" });
+
+                var fullName = (dto.FullName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(fullName))
+                    return BadRequest(new { message = "FullName is required" });
+
+                student.FullName = fullName;
+                if (!string.IsNullOrWhiteSpace(dto.UniqueID))
+                {
+                    student.UniqueID = dto.UniqueID.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(dto.BusNumber))
+                {
+                    student.BusNumber = dto.BusNumber.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(dto.RouteName))
+                {
+                    student.RouteName = dto.RouteName.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(dto.Grade))
+                {
+                    student.Grade = dto.Grade.Trim();
+                }
+
+                // Update or create linked profile in students table
+                var profile = await _context.Students.FirstOrDefaultAsync(s => s.UserId == id);
+                var bus = !string.IsNullOrWhiteSpace(dto.BusNumber)
+                    ? await _context.Buses.FirstOrDefaultAsync(b => b.BusNumber == dto.BusNumber.Trim())
+                    : null;
+
+                if (profile == null)
+                {
+                    profile = new Models.Student
+                    {
+                        UserId = id,
+                        Grade = dto.Grade ?? "Grade 10",
+                        BusId = bus?.Id
+                    };
+                    _context.Students.Add(profile);
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(dto.Grade))
+                    {
+                        profile.Grade = dto.Grade.Trim();
+                    }
+                    if (bus != null)
+                    {
+                        profile.BusId = bus.Id;
+                    }
+                }
+
+                // Update or create subscription status
+                if (!string.IsNullOrWhiteSpace(dto.SubscriptionStatus))
+                {
+                    var status = dto.SubscriptionStatus.Trim().ToUpper();
+                    if (status != "PAID" && status != "UNPAID" && status != "EXPIRED" && status != "CANCELLED")
+                    {
+                        status = "UNPAID";
+                    }
+
+                    var sub = await _context.Subscriptions
+                        .Where(s => s.UserId == id)
+                        .OrderByDescending(s => s.Id)
+                        .FirstOrDefaultAsync();
+
+                    if (sub != null)
+                    {
+                        sub.Status = status;
+                    }
+                    else
+                    {
+                        _context.Subscriptions.Add(new Models.Subscription
+                        {
+                            UserId = id,
+                            Status = status,
+                            StartDate = DateTime.UtcNow.Date,
+                            EndDate = DateTime.UtcNow.Date.AddMonths(1),
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Student updated successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in UpdateStudent");
+                return StatusCode(500, new { message = "Error updating student", error = ex.Message });
+            }
+        }
+
+        // DELETE /api/admin/students/{id}
+        [HttpDelete("students/{id:int}")]
+        public async Task<ActionResult> DeleteStudent([FromRoute] int id)
+        {
+            try
+            {
+                var student = await _context.Users.FirstOrDefaultAsync(u => u.Id == id && u.Role == "Student");
+                if (student == null)
+                    return NotFound(new { message = "Student not found" });
+
+                var profile = await _context.Students.FirstOrDefaultAsync(s => s.UserId == id);
+                if (profile != null)
+                {
+                    _context.Students.Remove(profile);
+                }
+
+                var subs = await _context.Subscriptions.Where(s => s.UserId == id).ToListAsync();
+                if (subs.Any())
+                {
+                    _context.Subscriptions.RemoveRange(subs);
+                }
+
+                _context.Users.Remove(student);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Student deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in DeleteStudent");
+                return StatusCode(500, new { message = "Error deleting student", error = ex.Message });
             }
         }
 
