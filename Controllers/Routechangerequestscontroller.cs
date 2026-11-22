@@ -104,7 +104,12 @@ namespace SafeWay.Controllers
 
             foreach (var route in activeRoutes)
             {
-                var stopCount = routeStations.Count(rs => rs.RouteId == route.Id);
+                var routeStationsList = routeStations.Where(rs => rs.RouteId == route.Id).OrderBy(rs => rs.StopOrder).ToList();
+                var stopCount = routeStationsList.Count;
+                var routeStationsNames = routeStationsList
+                    .Join(_context.Stations, rs => rs.StationId, s => s.Id, (rs, s) => s.Name)
+                    .ToList();
+
                 var routeBuses = buses.Where(b => b.RouteId == route.Id).ToList();
 
                 var routeDrivers = routeBuses
@@ -136,6 +141,7 @@ namespace SafeWay.Controllers
                     drivers = routeDrivers,
                     driverIds = driverIds,
                     stops = stopCount > 0 ? stopCount : 3,
+                    stations = routeStationsNames,
                     status = route.IsActive ? "Active" : "Inactive",
                 });
             }
@@ -143,9 +149,10 @@ namespace SafeWay.Controllers
             return Ok(list);
         }
 
-        // PUT /api/routechangerequests/routes/{id}
-        // Body: { name, driverIds, driverNames, busNumber }
+        // PUT / PATCH /api/routechangerequests/routes/{id}
+        // Body: { name, driverIds, driverNames, busNumber, stationNames, stops }
         [HttpPut("routes/{id:int}")]
+        [HttpPatch("routes/{id:int}")]
         public async Task<IActionResult> UpdateRoute([FromRoute] int id, [FromBody] UpdateRouteDto dto)
         {
             try
@@ -208,6 +215,34 @@ namespace SafeWay.Controllers
                     if (bus != null)
                     {
                         bus.RouteId = route.Id;
+                    }
+                }
+
+                if (dto.StationNames != null)
+                {
+                    var existingRs = await _context.RouteStations.Where(rs => rs.RouteId == id).ToListAsync();
+                    _context.RouteStations.RemoveRange(existingRs);
+
+                    int order = 1;
+                    foreach (var rawName in dto.StationNames.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    {
+                        var stName = rawName.Trim();
+                        var station = await _context.Stations.FirstOrDefaultAsync(s => s.Name.ToLower() == stName.ToLower());
+                        if (station == null)
+                        {
+                            station = new Station { Name = stName, IsActive = true };
+                            _context.Stations.Add(station);
+                            await _context.SaveChangesAsync();
+                        }
+
+                        var routeStation = new RouteStation
+                        {
+                            RouteId = id,
+                            StationId = station.Id,
+                            StopOrder = order++,
+                            PickupTime = TimeSpan.FromHours(7).Add(TimeSpan.FromMinutes((order - 1) * 15))
+                        };
+                        _context.RouteStations.Add(routeStation);
                     }
                 }
 
@@ -274,6 +309,32 @@ namespace SafeWay.Controllers
                         bus.RouteId = newRoute.Id;
                         await _context.SaveChangesAsync();
                     }
+                }
+
+                if (dto.StationNames != null && dto.StationNames.Any())
+                {
+                    int order = 1;
+                    foreach (var rawName in dto.StationNames.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    {
+                        var stName = rawName.Trim();
+                        var station = await _context.Stations.FirstOrDefaultAsync(s => s.Name.ToLower() == stName.ToLower());
+                        if (station == null)
+                        {
+                            station = new Station { Name = stName, IsActive = true };
+                            _context.Stations.Add(station);
+                            await _context.SaveChangesAsync();
+                        }
+
+                        var routeStation = new RouteStation
+                        {
+                            RouteId = newRoute.Id,
+                            StationId = station.Id,
+                            StopOrder = order++,
+                            PickupTime = TimeSpan.FromHours(7).Add(TimeSpan.FromMinutes((order - 1) * 15))
+                        };
+                        _context.RouteStations.Add(routeStation);
+                    }
+                    await _context.SaveChangesAsync();
                 }
 
                 return Ok(new { id = newRoute.Id, message = "Route created successfully" });
@@ -383,5 +444,7 @@ namespace SafeWay.Controllers
         public string? DriverName { get; set; }
         public List<string>? DriverNames { get; set; }
         public List<int>? DriverIds { get; set; }
+        public List<string>? StationNames { get; set; }
+        public int? Stops { get; set; }
     }
 }
